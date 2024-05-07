@@ -1,11 +1,23 @@
 from transformers import TextDataset, DataCollatorForLanguageModeling
 from transformers import Trainer, TrainingArguments
+import torch
+from pathlib import Path
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+
+save_directory = "/mounts/layout/palm/pretrained"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+tokenizer = AutoTokenizer.from_pretrained(save_directory)
+# Load the pre-trained model
+model = AutoModelForCausalLM.from_pretrained(save_directory).to(device)
 
 train_dataset = TextDataset(
     tokenizer=tokenizer,
-    file_path="/mounts/layout/palm/inputfiles,
+    file_path="/mounts/layout/palm/inputfiles/idk/",
+    # file_path="./hello.txt",
     block_size=128  # Define the maximum sequence length
 )
+
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
     mlm=False
@@ -20,9 +32,6 @@ training_args = TrainingArguments(
     save_steps=10_000,
     save_total_limit=2,
 )
-
-# Load the pre-trained model
-model = pass
 
 trainer = Trainer(
     model=model,
