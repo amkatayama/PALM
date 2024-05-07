@@ -1,13 +1,19 @@
 from pathlib import Path
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 
-save_directory = "/mounts/layout/palm/pretrained"
+inFile = open("/mounts/layout/palm/QandA/model.txt", "r")
 
-tokenizer = AutoTokenizer.from_pretrained(save_directory)
+modelName = inFile.read()
+modelDirectory = '/mounts/layout/palm/fineTunedModel/' + modelName
+inFile.close()
 
-model = AutoModelForCausalLM.from_pretrained(save_directory)
+tokenizer = AutoTokenizer.from_pretrained(modelDirectory)
+model = AutoModelForCausalLM.from_pretrained(modelDirectory)
 
-gen = pipeline("text-generation",model=model,tokenizer=tokenizer)
+inFile = open("/mounts/layout/palm/QandA/query.txt")
+query = inFile.read()
 
-generated_text = gen("My Name is philipp")
+gen = pipeline("text-generation", model=model, tokenizer=tokenizer, max_length=300)
+
+generated_text = gen(query)
 print(generated_text)
