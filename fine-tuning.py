@@ -1,11 +1,12 @@
 from transformers import TextDataset, DataCollatorForLanguageModeling
 from transformers import Trainer, TrainingArguments
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 import torch
 from pathlib import Path
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 # from datasets import ConcatDataset
 import os
+from torch.optim import AdamW
 
 class MultiFileTextDataset(Dataset):
     def __init__(self, tokenizer, file_paths, block_size):
@@ -23,13 +24,19 @@ class MultiFileTextDataset(Dataset):
     def __getitem__(self, i):
         return self.examples[i]
 
+torch.cuda.init()
 save_directory = "/mounts/layout/palm/pretrained"
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 tokenizer = AutoTokenizer.from_pretrained(save_directory)
 model = AutoModelForCausalLM.from_pretrained(save_directory).to(device)
-print("Tokenizer and Model successfully loaded!")
+print(f"Model loaded on {model.device}")
+# print("Tokenizer and Model successfully loaded!")
+
+# Set the padding token to the EOS token if it's not already set
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
 data_dir = "/mounts/layout/palm/inputfiles/idk"
 
@@ -38,7 +45,7 @@ data_files = [os.path.join(data_dir, file) for file in os.listdir(data_dir) if f
 
 train_dataset = MultiFileTextDataset(
     tokenizer=tokenizer,
-    file_path = data_files,
+    file_paths = data_files,
     block_size=50  # Define the maximum sequence length
 )
 
@@ -57,13 +64,36 @@ training_args = TrainingArguments(
     save_total_limit=2,
 )
 
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    data_collator=data_collator,
-    train_dataset=train_dataset,
-)
+# trainer = Trainer(
+#     model=model,
+#     args=training_args,
+#     data_collator=data_collator,
+#     train_dataset=train_dataset,
+# )
 
-trainer.train()
-trainer.save_model("/mounts/layout/palm/fineTunedModel")
+# Create a DataLoader
+train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+
+# Define an optimizer
+optimizer = AdamW(model.parameters(), lr=5e-5)
+
+# Manual training loop
+model.train()
+for epoch in range(3):  # Let's say you want to train for 3 epochs
+    for step, batch in enumerate(train_dataloader):
+        inputs = batch.to(device)
+        print(f"Inputs loaded on {inputs.device}")
+        outputs = model(inputs, labels=inputs)
+        loss = outputs.loss
+
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        if step % 100 == 0:
+            print(f"Epoch: {epoch}, Step: {step}, Loss: {loss.item()}")
+
+# trainer.train()
+torch.save(model, "/mounts/layout/palm/fineTunedModel")
+# model.save_model("/mounts/layout/palm/fineTunedModel")
 # trainer.save_model("./fine_tuned_model")
