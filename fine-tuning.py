@@ -1,43 +1,53 @@
 from transformers import TextDataset, DataCollatorForLanguageModeling
 from transformers import Trainer, TrainingArguments
+from torch.utils.data import DataLoader, Dataset
 import torch
 from pathlib import Path
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+# from datasets import ConcatDataset
 import os
+from torch.optim import AdamW
 
+class MultiFileTextDataset(Dataset):
+    def __init__(self, tokenizer, file_paths, block_size):
+        self.tokenizer = tokenizer
+        self.examples = []
+        for file_path in file_paths:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+                tokenized_text = tokenizer(text, truncation=True, padding="max_length", max_length=block_size, return_tensors="pt")
+                self.examples.extend(tokenized_text.input_ids)
+
+    def __len__(self):
+        return len(self.examples)
+
+    def __getitem__(self, i):
+        return self.examples[i]
+
+torch.cuda.init()
 save_directory = "/mounts/layout/palm/pretrained"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
 tokenizer = AutoTokenizer.from_pretrained(save_directory)
-# Load the pre-trained model
 model = AutoModelForCausalLM.from_pretrained(save_directory).to(device)
+print(f"Model loaded on {model.device}")
+# print("Tokenizer and Model successfully loaded!")
 
-data_dir = "/mounts/layout/palm/inputfiles"
+# Set the padding token to the EOS token if it's not already set
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+data_dir = "/mounts/layout/palm/inputfiles/idk"
 
 # List all text files in the directory
 data_files = [os.path.join(data_dir, file) for file in os.listdir(data_dir) if file.endswith(".txt")]
 
-# Create training datasets for each file
-train_datasets = []
-for file in data_files:
-    with open(file, "r", encoding="utf-8") as f:
-        text = f.read()
-        train_dataset = TextDataset(
-            tokenizer=tokenizer,
-            text=text,
-            block_size=128  # Define the maximum sequence length
-        )
-        train_datasets.append(train_dataset)
-
-# Concatenate all training datasets
-combined_train_dataset = ConcatDataset(train_datasets)
-
-# train_dataset = TextDataset(
-    # tokenizer=tokenizer,
-    # file_path="/mounts/layout/palm/inputfiles/idk/",
-    # file_path="./hello.txt",
-    # block_size=128  # Define the maximum sequence length
-# )
+train_dataset = MultiFileTextDataset(
+    tokenizer=tokenizer,
+    file_paths = data_files,
+    block_size=50  # Define the maximum sequence length
+)
 
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
@@ -54,12 +64,36 @@ training_args = TrainingArguments(
     save_total_limit=2,
 )
 
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    data_collator=data_collator,
-    train_dataset=combined_train_dataset,
-)
+# trainer = Trainer(
+#     model=model,
+#     args=training_args,
+#     data_collator=data_collator,
+#     train_dataset=train_dataset,
+# )
 
-trainer.train()
-trainer.save_model("./fine_tuned_model")
+# Create a DataLoader
+train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+
+# Define an optimizer
+optimizer = AdamW(model.parameters(), lr=5e-5)
+
+# Manual training loop
+model.train()
+for epoch in range(3):  # Let's say you want to train for 3 epochs
+    for step, batch in enumerate(train_dataloader):
+        inputs = batch.to(device)
+        print(f"Inputs loaded on {inputs.device}")
+        outputs = model(inputs, labels=inputs)
+        loss = outputs.loss
+
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        if step % 100 == 0:
+            print(f"Epoch: {epoch}, Step: {step}, Loss: {loss.item()}")
+
+# trainer.train()
+torch.save(model, "/mounts/layout/palm/fineTunedModel")
+# model.save_model("/mounts/layout/palm/fineTunedModel")
+# trainer.save_model("./fine_tuned_model")

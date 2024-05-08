@@ -1,2 +1,2 @@
 # PALM
-Fine-tuning LLM for translation
+Fine-tuning LLM for given text files
