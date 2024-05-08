@@ -1,43 +1,46 @@
 from transformers import TextDataset, DataCollatorForLanguageModeling
 from transformers import Trainer, TrainingArguments
+from torch.utils.data import Dataset
 import torch
 from pathlib import Path
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+# from datasets import ConcatDataset
 import os
 
+class MultiFileTextDataset(Dataset):
+    def __init__(self, tokenizer, file_paths, block_size):
+        self.tokenizer = tokenizer
+        self.examples = []
+        for file_path in file_paths:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+                tokenized_text = tokenizer(text, truncation=True, padding="max_length", max_length=block_size, return_tensors="pt")
+                self.examples.extend(tokenized_text.input_ids)
+
+    def __len__(self):
+        return len(self.examples)
+
+    def __getitem__(self, i):
+        return self.examples[i]
+
 save_directory = "/mounts/layout/palm/pretrained"
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+print(device)
 
 tokenizer = AutoTokenizer.from_pretrained(save_directory)
-# Load the pre-trained model
 model = AutoModelForCausalLM.from_pretrained(save_directory).to(device)
+print("Tokenizer and Model successfully loaded!")
 
-data_dir = "/mounts/layout/palm/inputfiles"
+data_dir = "/mounts/layout/palm/inputfiles/idk"
 
 # List all text files in the directory
 data_files = [os.path.join(data_dir, file) for file in os.listdir(data_dir) if file.endswith(".txt")]
 
-# Create training datasets for each file
-train_datasets = []
-for file in data_files:
-    with open(file, "r", encoding="utf-8") as f:
-        text = f.read()
-        train_dataset = TextDataset(
-            tokenizer=tokenizer,
-            text=text,
-            block_size=128  # Define the maximum sequence length
-        )
-        train_datasets.append(train_dataset)
-
-# Concatenate all training datasets
-combined_train_dataset = ConcatDataset(train_datasets)
-
-# train_dataset = TextDataset(
-    # tokenizer=tokenizer,
-    # file_path="/mounts/layout/palm/inputfiles/idk/",
-    # file_path="./hello.txt",
-    # block_size=128  # Define the maximum sequence length
-# )
+train_dataset = MultiFileTextDataset(
+    tokenizer=tokenizer,
+    file_path = data_files,
+    block_size=50  # Define the maximum sequence length
+)
 
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
@@ -58,8 +61,9 @@ trainer = Trainer(
     model=model,
     args=training_args,
     data_collator=data_collator,
-    train_dataset=combined_train_dataset,
+    train_dataset=train_dataset,
 )
 
 trainer.train()
-trainer.save_model("./fine_tuned_model")
+trainer.save_model("/mounts/layout/palm/fineTunedModel")
+# trainer.save_model("./fine_tuned_model")
